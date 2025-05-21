@@ -8,14 +8,17 @@ import os
 import json
 import matplotlib.pyplot as plt
 import numpy as np
+import serial
+
 numSamples = 0
 
 # Print received message to console
 def print_message(*args):
     try:
-        # print(args[0]) #added to see raw data
+        print(args[0]) #added to see raw data
         obj = json.loads(args[0].decode())
         print(obj.get('data'))
+        print("data")
         numSamplesInChannelOne = len(obj.get('data')[0])
         global numSamples
         print("NumSamplesInPacket_ChannelOne == " + str(numSamplesInChannelOne))
@@ -82,6 +85,8 @@ if __name__ == "__main__":
   parser.add_argument("--option",default="print",help="Debugger option")
   parser.add_argument("--len",default=9,help="Debugger option")
   args = parser.parse_args()
+  
+  ser = serial.Serial('/dev/cu.usbmodem1101', 9600)
 
   # Set up necessary parameters from command line
   length =  int(args.len)
@@ -117,30 +122,50 @@ if __name__ == "__main__":
   print("Listening...")
   start = time.time()
   
-  duration = 10
+  duration = float('inf')
   timestamps = []
   records = [[],[],[],[],[],[],[],[]]
-  while time.time() <= start + duration:
-    data, addr = sock.recvfrom(20000) # buffer size is 20000 bytes
-    if args.option=="print":
+  
+  
+  try:
+    while time.time() <= start + duration:
+        data, addr = sock.recvfrom(20000) # buffer size is 20000 bytes
         plot_message(records, data)
-        plt.clf()
-        try:
-            plt.gca().get_legend().remove()
-        except:
-            pass
         R_per_CH = len(records[0])
-        for channel_idx in range(len(records)):
-            plt.plot(np.linspace(start, time.time(), num=R_per_CH),
-                        np.array(records[channel_idx])-channel_idx*100, label=f'ch {channel_idx}')
-        plt.legend(loc='upper right')
-        plt.pause(0.001)
+        ch_7_hist = np.std(records[6][-200:])
+        ch_8_hist = np.std(records[7][-200:])
         
-        # numSamples += 1
-    elif args.option=="record":
-      record_to_file(data)
-      numSamples += 1
+        if ch_7_hist < 35 and ch_8_hist < 50:
+            mode = "relaxed"
+            ser.write('1'.encode('utf-8'))
+        elif ch_8_hist < 80:
+            mode = "pinch"
+            ser.write('2'.encode('utf-8'))
+        else:
+            mode = "flex"
+            ser.write('3'.encode('utf-8'))
+        numSamples += 1
+        if args.option=="plot":
+            plt.clf()
+            try:
+                plt.gca().get_legend().remove()
+            except:
+                pass
+            for channel_idx in range(6,8):
+                plt.plot(np.linspace(start, time.time(), num=R_per_CH),np.array(records[channel_idx])-channel_idx*400, label=f'ch {channel_idx+1} {np.std(records[channel_idx][-200:]):0.2f}')
+            plt.plot([],[],label=f'MODE: {mode}')
+            plt.legend(loc='upper right')
+            plt.pause(0.001)
+        elif args.option=="record":
+            record_to_file(data)
+            numSamples += 1
+        else:
+            print(f"CH7: {ch_7_hist:0.1f}\t CH8: {ch_8_hist:0.1f}")
+            print(f"MODE: {mode}")
+  except BaseException as e:
+    print('Exiting...')
 
 print( "Samples == {}".format(numSamples) )
 print( "Duration == {}".format(duration) )
 print( "Avg Sampling Rate == {}".format(numSamples / duration) )
+
