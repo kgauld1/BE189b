@@ -1,32 +1,40 @@
 const int INDEX = 0;
 const int MIDDLE = 1;
-const int RING = 1;
-const int PINKY = 1;
+const int RING = 2;
+const int PINKY = 3;
 
-const int motorPins[][3] = {
-  {22, 23, 2}
+const int NUM_FINGERS = 4;
+
+const int motorPins[NUM_FINGERS][3] = {
+  {51, 50, 2}, // Index
+  {47, 46, 3}, // Middle
+  {43, 42, 4}, // Ring
+  {37, 36, 5}, // Pinky
 };
 
-const int encoderPins[][2] = {
-  {25,24}
+const int encoderPins[NUM_FINGERS][2] = {
+  {53, 52}, // Index
+  {49, 48}, // Middle
+  {45, 44}, // Ring
+  {39, 38}, // Pinky
 };
 
-const int hallPins[] = {A0};
+const int hallPins[NUM_FINGERS] = {A0,A1,A2,A3};
 
-const int NUM_FINGERS = 5;
+volatile long t_rise[NUM_FINGERS] = {0,0,0,0};
+volatile int directions[NUM_FINGERS] = {1,1,1,1};
+volatile long encoderValues[NUM_FINGERS] = {0,0,0,0};
+volatile int lastEncoded[NUM_FINGERS] = {0,0,0,0}; 
+int encoderOffsets[NUM_FINGERS] = {0,0,0,0};
 
-volatile long encoderValues[] = {0}; 
-volatile int lastEncoded[] = {0}; 
-int encoderOffsets[] = {};
-
-const int homingCutOff1 = 620;
-const int homingCutOff2 = 550;
+const int homingCutOff1[NUM_FINGERS] = {620, 610, 620, 620};
+const int homingCutOff2[NUM_FINGERS] = {550, 550, 550, 550};
 bool initialization = true;
 
-unsigned long lastPrint = 0;
-long lastEncoderValue = 0;
-float rpm = 0;
-const int encoderPulsesPerRev = 14 * 150;
+
+int numActivations[NUM_FINGERS] = {0,0,0,0};
+const int NUM_BEFORE_CALIBRATION = 20;
+
 
 void stopMotor(int motorIdx){
   analogWrite(motorPins[motorIdx][2], 0);
@@ -35,113 +43,107 @@ void stopMotor(int motorIdx){
 }
 
 
-void homingSequence(){
-  for (int i = 0; i < NUM_FINGERS; i++) {
-     stopMotor(i);
-     while (analogRead(hallPins[i]) > homingCutOff2){
-      analogWrite(motorPins[i][2], 200);
-      digitalWrite(motorPins[i][0], LOW);
-      digitalWrite(motorPins[i][1], HIGH);
-    }
-    stopMotor(i);
-    delay(50);
-    while (analogRead(hallPins[i]) < homingCutOff1 ){
-      analogWrite(motorPins[i][2], 200);
-      digitalWrite(motorPins[i][0], HIGH);
-      digitalWrite(motorPins[i][1], LOW);
-    }
-    stopMotor(i);
-    delay(100);
-    encoderOffsets[i] = encoderValues[i];
+void homingSequence(int i){
+  stopMotor(i);
+  while (analogRead(hallPins[i]) > homingCutOff2[i]){
+    Serial.print("Finger: ");
+    Serial.print(i);
+    Serial.print("; Hall: ");
+    Serial.print(analogRead(hallPins[i]));
+    Serial.print("; Encoder: ");
+    Serial.println(encoderValues[i]);
+    analogWrite(motorPins[i][2], 200);
+    goUp(i);
   }
+  stopMotor(i);
+  delay(50);
+  while (analogRead(hallPins[i]) < homingCutOff1[i]){
+    Serial.print("Finger: ");
+    Serial.print(i);
+    Serial.print("; Hall: ");
+    Serial.print(analogRead(hallPins[i]));
+    Serial.print("; Encoder: ");
+    Serial.println(encoderValues[i]);
+    analogWrite(motorPins[i][2], 200);
+    goDown(i);
+  }
+  stopMotor(i);
+  delay(100);
+  encoderOffsets[i] = encoderValues[i];
+  Serial.print("Offset" );
+  Serial.println(encoderOffsets[i]);
+  
 }
 
 
 void setup() {
-  pinMode(LED_BUILTIN, OUTPUT);
+  Serial.begin(9600);
   // Motor pins
   for (int j= 0; j < NUM_FINGERS; j ++){
     for (int i = 0; i < 3; i++) {  
       pinMode(motorPins[j][i], OUTPUT);
     }
     pinMode(hallPins[j], INPUT);
+    stopMotor(j);
   }
   
-  Serial.begin(9600);
+
 
   for (int i = 0; i < NUM_FINGERS; i++) {
     pinMode(encoderPins[i][0], INPUT_PULLUP);
     pinMode(encoderPins[i][1], INPUT_PULLUP);
-    int MSB = digitalRead(encoderPins[i][0]);
-    int LSB = digitalRead(encoderPins[i][1]);
-    lastEncoded[i] = (MSB << 1) | LSB;
   } 
   attachInterrupt(digitalPinToInterrupt(encoderPins[INDEX][0]), updateEncoderIndex, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(encoderPins[INDEX][1]), updateEncoderIndex, CHANGE);
 
-  attachInterrupt(digitalPinToInterrupt(encoderPins[MIDDLE][0]), updateEncoderIndex, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(encoderPins[MIDDLE][1]), updateEncoderIndex, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(encoderPins[MIDDLE][0]), updateEncoderMiddle, CHANGE);
 
-  attachInterrupt(digitalPinToInterrupt(encoderPins[RING][0]), updateEncoderIndex, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(encoderPins[RING][1]), updateEncoderIndex, CHANGE);
+  attachInterrupt(digitalPinToInterrupt(encoderPins[RING][0]), updateEncoderRing, CHANGE);
 
-  attachInterrupt(digitalPinToInterrupt(encoderPins[INDEX][0]), updateEncoderIndex, CHANGE);
-  attachInterrupt(digitalPinToInterrupt(encoderPins[INDEX][1]), updateEncoderIndex, CHANGE);
-}
-void updateEncoderMiddle() {
-  int MSB = digitalRead(encoderPins[MIDDLE][0]);
-  int LSB = digitalRead(encoderPins[MIDDLE][1]);
-  int encoded = (MSB << 1) | LSB;
-  int sum = (lastEncoded[MIDDLE] << 2) | encoded;
-
-  if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011)
-    encoderValues[MIDDLE]--;
-  if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000)
-    encoderValues[MIDDLE]++;
-
-  lastEncoded[MIDDLE] = encoded;
+  attachInterrupt(digitalPinToInterrupt(encoderPins[PINKY][0]), updateEncoderPinky, CHANGE);
 }
 
-void updateEncoderRing() {
-  int MSB = digitalRead(encoderPins[RING][0]);
-  int LSB = digitalRead(encoderPins[RING][1]);
-  int encoded = (MSB << 1) | LSB;
-  int sum = (lastEncoded[RING] << 2) | encoded;
-
-  if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011)
-    encoderValues[RING]--;
-  if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000)
-    encoderValues[RING]++;
-
-  lastEncoded[RING] = encoded;
+void updateEncoderIndex(){
+  int idx = INDEX;
+  if (digitalRead(encoderPins[idx][1])){
+    directions[idx] = -1;
+  }
+  else{
+    directions[idx] = 1;
+  }
+  encoderValues[idx] += directions[idx];
+}
+  
+void updateEncoderMiddle(){
+  int idx = MIDDLE;
+  if (digitalRead(encoderPins[idx][1])){
+    directions[idx] = -1;
+  }
+  else{
+    directions[idx] = 1;
+  }
+  encoderValues[idx] += directions[idx];
 }
 
-void updateEncoderPinky() {
-  int MSB = digitalRead(encoderPins[PINKY][0]);
-  int LSB = digitalRead(encoderPins[PINKY][1]);
-  int encoded = (MSB << 1) | LSB;
-  int sum = (lastEncoded[PINKY] << 2) | encoded;
-
-  if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011)
-    encoderValues[PINKY]--;
-  if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000)
-    encoderValues[PINKY]++;
-
-  lastEncoded[PINKY] = encoded;
+void updateEncoderRing(){
+  int idx = RING;
+  if (digitalRead(encoderPins[idx][1])){
+    directions[idx] = -1;
+  }
+  else{
+    directions[idx] = 1;
+  }
+  encoderValues[idx] += directions[idx];
 }
 
-void updateEncoderIndex() {
-  int MSB = digitalRead(encoderPins[INDEX][0]);
-  int LSB = digitalRead(encoderPins[INDEX][1]);
-  int encoded = (MSB << 1) | LSB;
-  int sum = (lastEncoded[INDEX] << 2) | encoded;
-
-  if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011)
-    encoderValues[INDEX]--;
-  if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000)
-    encoderValues[INDEX]++;
-
-  lastEncoded[INDEX] = encoded;
+void updateEncoderPinky(){
+  int idx = PINKY;
+  if (digitalRead(encoderPins[idx][1])){
+    directions[idx] = -1;
+  }
+  else{
+    directions[idx] = 1;
+  }
+  encoderValues[idx] += directions[idx];
 }
 
 void goUp(int motorIdx){
@@ -155,48 +157,49 @@ void goDown(int motorIdx){
 }
 
 void goToPosition(int motorIdx, int pos){
-  int tolerance = 100;
-  if (encoderValues[motorIdx] < pos){
+  int tolerance = 20;
+  if (encoderValues[motorIdx]-encoderOffsets[motorIdx] < pos){
     goUp(motorIdx);
   }
-  if (encoderValues[motorIdx] >= pos){
+  if (encoderValues[motorIdx]-encoderOffsets[motorIdx] >= pos){
     goDown(motorIdx);
   }
-  while (abs(encoderValues[motorIdx] - pos) > tolerance ){
+  while (abs((encoderValues[motorIdx]-encoderOffsets[motorIdx]) - pos) > tolerance ){
     analogWrite(motorPins[motorIdx][2], 200);
+    Serial.print("Finger:");
+    Serial.print(motorIdx);
+    Serial.print(", ");
+    Serial.print("Encoder:");
+    Serial.println(encoderValues[motorIdx]-encoderOffsets[motorIdx]);
   }
   stopMotor(motorIdx);
+  numActivations[motorIdx]++;
 }
 
 void loop() {
+  // analogWrite(motorPins[RING][2], 200);
+  //   digitalWrite(motorPins[RING][0], LOW);
+  //     digitalWrite(motorPins[RING][1], HIGH);
+      // Serial.println(analogRead(hallPins[RING]));
   if (initialization){
     delay(3000);
-    homingSequence();
+    for (int i = 2; i < NUM_FINGERS; i ++){
+      homingSequence(i);
+    }
     initialization = false;
     delay(3000);
   }
-  goToPosition(0, 10000);
-  delay(1000);
-  goToPosition(0, 200);
-  delay(1000);
-  // for (int i = 100; i <=200; i++) {
-  //   analogWrite(motorPins[0][2], i);
-  //   digitalWrite(motorPins[0][0], LOW);
-  //     digitalWrite(motorPins[0][1], HIGH);
-  //   delay(5);
-  //   Serial.println(indexEncoderValue-indexEncoderOffset);
-  // }
-  // stopMotor(0);
-  // delay(1000);
-  // for (int i = 200; i >= 100; i--) {
-  //   analogWrite(motorPins[0][2], i);
-  //   digitalWrite(motorPins[0][0], HIGH);
-  //     digitalWrite(motorPins[0][1], LOW);
-  //   delay(5);
-  //   Serial.println(indexEncoderValue-indexEncoderOffset);
-  // }
-  // stopMotor(0);
-  // delay(1000);
-
+  for (int i = 2; i < NUM_FINGERS; i ++){
+    goToPosition(i, 4000); 
+    delay(1000);
+    goToPosition(i, 100);
+    delay(1000);
+  }
+  // check if we need to recalibrate any fingers
+  for (int i = 0; i < NUM_FINGERS; i ++){
+    if (numActivations[i] >= NUM_BEFORE_CALIBRATION){
+      homingSequence(i);
+    }
+  } 
 }
 
