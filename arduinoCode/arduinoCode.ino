@@ -6,6 +6,13 @@ const int THUMB_BASE_ROT = 4;
 const int THUMB_BASE_EXT = 5;
 const int THUMB = 6;
 
+const int downButton = 12;
+int downButtonState = 0;
+const int upButton = 11;
+int upButtonState = 0;
+const int nextButton = 13;
+int nextButtonState = 0;
+
 const int NUM_FINGERS = 7;
 
 const int motorPins[NUM_FINGERS][3] = {
@@ -32,7 +39,7 @@ const int encoderPins[NUM_FINGERS][2] = {
 const int MOTOR_SPEED = 225;
 const int hallPins[NUM_FINGERS] = {A0,A1,A2,A3,A4,A5,A6};
 
-int OPEN_POS[NUM_FINGERS] = {5000,4250,4500,4500, 1000, 1000, 1000};
+int OPEN_POS[NUM_FINGERS] = {5000,4250,4500,4500, 1000, 1000, 2500};
 int CLOSE_POS[NUM_FINGERS] = {500,500,500,500, 500, 500, 500};
 
 
@@ -44,7 +51,7 @@ int encoderOffsets[NUM_FINGERS] = {0,0,0,0,0,0,0};
 
 const int homingCutOff1[NUM_FINGERS] = {570, 580, 580, 580, 580, 580, 580};
 const int homingCutOff2[NUM_FINGERS] = {550, 550, 550, 550, 550, 550, 550};
-long timeOuts[NUM_FINGERS] = {3000,3000, 3000, 3000, 1000, 1000, 1000};
+long timeOuts[NUM_FINGERS] = {3000,3000, 3000, 3000, 3000, 3000, 3000};
 bool initialization = true;
 
 
@@ -100,6 +107,12 @@ void homingSequence(int i){
 
 void setup() {
   Serial.begin(9600);
+
+  // Homing buttons
+  pinMode(downButton, INPUT);
+  pinMode(upButton, INPUT);
+  pinMode(nextButton, INPUT);
+
   // Motor pins
   for (int j= 0; j < NUM_FINGERS; j ++){
     for (int i = 0; i < 3; i++) {  
@@ -241,7 +254,7 @@ void goToPosition(int motorIdx, int pos){
 void setAllFingers(int targetPos[]){
   int done[NUM_FINGERS] = {0,0,0,0,0,0,0};
   int tolerance = 20;
-  long t0[] = {millis(), millis(), millis(), millis()};
+  long t0[] = {millis(), millis(), millis(), millis(), millis(), millis(), millis()};
   while (done[0]!= 1 || done[1]!= 1 || done[2]!= 1 || done[3]!= 1 || done[4]!= 1 || done[5] != 1 || done[6] != 1){
     Serial.print("0:");
     Serial.print(encoderValues[0]-encoderOffsets[0]);
@@ -253,7 +266,17 @@ void setAllFingers(int targetPos[]){
     Serial.print(encoderValues[2]-encoderOffsets[2]);
     Serial.print(", ");
     Serial.print("3:");
-    Serial.println(encoderValues[3]-encoderOffsets[3]);
+    Serial.print(encoderValues[3]-encoderOffsets[3]);
+    Serial.print(", ");
+    Serial.print("4:");
+    Serial.print(encoderValues[4]-encoderOffsets[4]);
+    Serial.print(", ");
+    Serial.print("5:");
+    Serial.print(encoderValues[5]-encoderOffsets[5]);
+     Serial.print(", ");
+    Serial.print("6:");
+    Serial.println(encoderValues[6]-encoderOffsets[6]);
+
 
 
     for (int i = 0; i < NUM_FINGERS; i ++){
@@ -280,27 +303,76 @@ void setAllFingers(int targetPos[]){
   }
 }
 
-// void pinch(){
+void pinch(){
 
-//   int phase1[NUM_FINGERS] = {5000,4250,4500,4500, 1000, 1000, 1000};
-//   int phase2[NUM_FINGERS] = {5000,4250,4500,4500, 500, 500, 500};
-//   setAllFingers(phase1);
-//   delay(1000);
-//   setAllFingers();
-// }
+  int phase1[NUM_FINGERS] = {5000,4250,4500,4500, 1800, 0, 2500};
+  int phase2[NUM_FINGERS] = {5000,4250,4500,4500, 1800, 0, 2500};
+  int phase3[NUM_FINGERS] = {2500,4250,4500,4500, 1800, 0, 2500};
+  setAllFingers(phase1);
+  delay(50);
+  setAllFingers(phase2);
+  delay(1000);
+  setAllFingers(phase3);
+}
 
 void loop() {
   if (initialization){
     delay(3000);
+    goUp(INDEX);
+    goUp(MIDDLE);
+    analogWrite(motorPins[INDEX][2], MOTOR_SPEED);
+    analogWrite(motorPins[MIDDLE][2], MOTOR_SPEED);
+    delay(500);
+    stopMotor(INDEX);
+    stopMotor(MIDDLE);
+
+    while (digitalRead(nextButton) == 0){
+      if (digitalRead(downButton)== 1){
+        goDown(THUMB_BASE_EXT);
+        analogWrite(motorPins[THUMB_BASE_EXT][2], MOTOR_SPEED);
+      }
+      else if (digitalRead(upButton) == 1){
+        goUp(THUMB_BASE_EXT);
+        analogWrite(motorPins[THUMB_BASE_EXT][2], MOTOR_SPEED);
+      }
+      else{
+        stopMotor(THUMB_BASE_EXT);
+      }
+    }
+    delay(500);
+    while (digitalRead(nextButton) == LOW){
+      if (digitalRead(downButton)== HIGH){
+        goDown(THUMB_BASE_ROT);
+        analogWrite(motorPins[THUMB_BASE_ROT][2], MOTOR_SPEED);
+      }
+      else if (digitalRead(upButton) == HIGH){
+        goUp(THUMB_BASE_ROT);
+        analogWrite(motorPins[THUMB_BASE_ROT][2], MOTOR_SPEED);
+      }
+      else{
+        stopMotor(THUMB_BASE_ROT);
+      }
+    }
+    
+    homingSequence(4);
+    homingSequence(5);
+    homingSequence(6);
+    goToPosition(THUMB, OPEN_POS[THUMB]);
+   
+    goToPosition(6, OPEN_POS[6]);
     for (int i = 0; i < NUM_FINGERS; i ++){
       if (i == 5) {
-        goToPosition(0, OPEN_POS[0]);
+        goToPosition(INDEX, OPEN_POS[INDEX]);
+        goToPosition(MIDDLE, OPEN_POS[MIDDLE]);
       }
       homingSequence(i);
     }
     initialization = false;
     delay(3000);
   }
+
+  pinch();
+  delay(5000);
 
   // setAllFingers(OPEN_POS);
   // delay(3000);
