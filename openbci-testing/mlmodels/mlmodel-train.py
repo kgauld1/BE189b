@@ -7,7 +7,7 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 
 # 1) Load data
-df = pd.read_csv('filtered_data.csv')
+df = pd.read_csv('filtered_528_nodup.csv')
 
 # Drop timestamp
 df = df.drop(columns=['timestamp'])
@@ -17,8 +17,9 @@ le = LabelEncoder()
 df['mode_label'] = le.fit_transform(df['mode'])
 
 # Features and labels
-features = df.drop(columns=['mode', 'mode_label']).values  # shape (N, 11)
+features = df.drop(columns=['Unnamed: 0.1', 'Unnamed: 0','mode', 'mode_label', 'filtered_mode']).values
 labels = df['mode_label'].values
+
 
 # Scale features
 scaler = StandardScaler()
@@ -26,7 +27,7 @@ features = scaler.fit_transform(features)
 
 # 2) Create sliding windows
 WINDOW_SIZE = 250  # e.g., 1 second at 250Hz
-STEP_SIZE = 125    # 50% overlap
+STEP_SIZE = 75    # 50% overlap
 
 split_ratio = 0.8
 split_index = int(len(features) * split_ratio)
@@ -103,15 +104,17 @@ input_size = X_train.shape[2]  # 11 features
 hidden_size = 128
 num_layers = 2
 num_classes = len(le.classes_)
+print(f"{num_classes=}")
 
 model = EEG_LSTM(input_size, hidden_size, num_layers, num_classes)
 
 # 6) Training setup
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+print(device)
 model = model.to(device)
 
 criterion = nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
 
 # 7) Training loop
 def train(model, loader):
@@ -131,17 +134,32 @@ def evaluate(model, loader):
     model.eval()
     correct = 0
     total = 0
+    total_loss = 0
     with torch.no_grad():
         for X_batch, y_batch in loader:
             X_batch, y_batch = X_batch.to(device), y_batch.to(device)
             outputs = model(X_batch)
+            loss = criterion(outputs, y_batch)
+            total_loss += loss.item()*X_batch.size(0)
             _, predicted = torch.max(outputs, 1)
             correct += (predicted == y_batch).sum().item()
             total += y_batch.size(0)
-    return correct / total
+    return correct / total, total_loss/len(loader.dataset)
 
 EPOCHS = 20
+best_val_loss = np.inf
+save_path = 'lstm_best.pth'
 for epoch in range(1, EPOCHS + 1):
     train_loss = train(model, train_loader)
-    test_acc = evaluate(model, test_loader)
-    print(f"Epoch {epoch}: Train loss {train_loss:.4f} | Test accuracy {test_acc:.4f}")
+    val_acc, val_loss = evaluate(model, test_loader)
+    print(f"Epoch {epoch}: Train loss {train_loss:.4f} | Test accuracy {val_acc:.4f} | Val loss {val_loss:.4f}")
+    if val_loss < best_val_loss:
+        best_val_loss = val_loss
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': model.state_dict(),
+            'optimizer_state_dict': optimizer.state_dict(),
+            'val_loss': val_loss,
+            'val_acc': val_acc,
+        }, save_path)
+        print(f"Model saved at epoch {epoch} with val loss {val_loss:.4f}")

@@ -84,12 +84,12 @@ def eval_epoch(model, loader, criterion, device):
     return total_loss / len(loader.dataset), correct / total
 
 # === Config ===
-csv_path = 'filtered_data_528.csv'
+csv_path = 'filtered_528_nodup.csv'
 window_size = 250
 step_size = 125
 batch_size = 64
 epochs = 30
-save_path = 'eegnet_tf_model.pth'
+save_path = 'eegnet_tf_model_nd.pth'
 
 # === Load pretrained model ===
 path_kwargs = hf_hub_download(repo_id='PierreGtch/EEGNetv4', filename='EEGNetv4_Lee2019_MI/kwargs.pkl')
