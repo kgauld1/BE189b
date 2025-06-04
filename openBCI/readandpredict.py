@@ -113,8 +113,8 @@ class BCI:
     def send_cycle(self):
         try:
             while not self.stopflag.wait(0.01):
-                print(f'sending {LABEL_MAP[LABEL_MAP[STATE_MAP[self.thresh_state]]]}')
-                self.arduino.write(f"{LABEL_MAP[STATE_MAP[self.thresh_state]]}".encode('utf-8'))
+                print(f'sending {LABEL_MAP[STATE_MAP[self.thresh_state]]}')
+                self.arduino.write(f"{LABEL_MAP[STATE_MAP[self.thresh_state]]}\n".encode('utf-8'))
                 time.sleep(0.1)
         except BaseException as e:
             raise e
@@ -172,7 +172,8 @@ class BCI:
             filtered_emg.append(chdat)
 
         filtered_signals = np.array(filtered_mu + filtered_beta + filtered_emg)  # (250, 6+6+2)
-        with open('Models/scaler_save.pkl', 'rb') as f:
+        filtered_signals = np.array(filtered_emg)
+        with open('Models/scaler_save_emg.pkl', 'rb') as f:
             scaler = pickle.load(f)
         filtered_signals = scaler.transform(filtered_signals.T).T
 
@@ -180,21 +181,32 @@ class BCI:
         tensor_in = tensor_in.permute(0, 2, 1)     # (1, 250, 14)
         prediction = self.predictor(tensor_in)
         probs = torch.softmax(prediction, dim=1)
-        _, pclasses = torch.max(prediction, 1)
-        pc = pclasses.detach().numpy()[0]
+        probs = probs.detach().numpy()[0]
 
-        prediction = prediction.detach().numpy()[0]
+
+        # _, pclasses = torch.max(prediction, 1)
+        # pc = pclasses.detach().numpy()[0]
+        if probs[0] > 0.6:
+            pc = 0
+        elif probs[1] > 0.5 :
+            pc = 1
+        else:
+            pc = 2
+
+        # prediction = prediction.detach().numpy()[0]
         # print(f"PREDICTION: {prediction}, {pc}, {LABEL_MAP[pc]}")
-        print("PROBABILITIES:", probs.detach().numpy()[0], pc)
+        print("PROBABILITIES:", probs, pc)
 
 
         dt = 1/self.sampling_rate
-        T = 1 # update 1 second
+        T = 0.10 # update 1 second
         thr = 0.33
         self.raw_state += dt/T * (STATE_MAP[LABEL_MAP[pc]] - self.raw_state)
+        print(self.raw_state)
         if np.abs(self.raw_state) < thr:
             self.thresh_state = 0
         elif np.abs(self.raw_state) > 1-thr:
+            print("ENTERED")
             self.thresh_state = np.sign(self.raw_state)
         
         # print(f"PREDICTION: {prediction}")
@@ -213,9 +225,9 @@ if __name__ == '__main__':
     board_shim = None
     
     try:
-        model = EEG_LSTM(14, 128, 2, 3)
+        model = EEG_LSTM(2, 128, 2, 3)
         # model = EEGNet(num_channels=16, num_classes=3, samples=250)
-        model_path = 'Models/lstm_best_2emg.pth'
+        model_path = 'Models/lstm_best_emgonly_backup.pth'#lstm_best_2emg.pth'
         model.load_state_dict(torch.load(model_path, map_location=torch.device('cpu'))['model_state_dict'])
         print(model)
     except BaseException as e:
